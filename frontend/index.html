@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <title>The Molecule of More</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: linear-gradient(135deg, #e6edf7, #f8fbff);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            width: 90%;
+            max-width: 900px;
+            background: white;
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.08);
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 36px;
+            color: #1f2d3d;
+        }
+
+        .input-row {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 30px;
+        }
+
+        input {
+            flex: 1;
+            padding: 14px 16px;
+            font-size: 16px;
+            border-radius: 12px;
+            border: 1px solid #dce3ef;
+            outline: none;
+            transition: 0.2s;
+        }
+
+        input:focus {
+            border-color: #4a90e2;
+            box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
+        }
+
+        button {
+            padding: 14px 22px;
+            font-size: 16px;
+            border-radius: 12px;
+            border: none;
+            cursor: pointer;
+            color: white;
+            font-weight: 600;
+            background: linear-gradient(135deg, #4a90e2, #357abd);
+            transition: 0.2s;
+        }
+
+        button:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+
+        .answer-card {
+            background: #f9fbff;
+            padding: 24px;
+            border-radius: 16px;
+            border: 1px solid #e3eaf5;
+            min-height: 100px;
+        }
+
+        .answer-title {
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: #1f2d3d;
+        }
+
+        .answer-text {
+            line-height: 1.6;
+            color: #444;
+        }
+
+        .sources {
+            margin-top: 15px;
+            text-align: right;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 6px 12px;
+            font-size: 13px;
+            background: #e8f1ff;
+            color: #2f5aa8;
+            border-radius: 999px;
+        }
+
+        .loading {
+            opacity: 0.6;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>The Molecule of More</h1>
+
+    <div class="input-row">
+        <input type="text" id="question" placeholder="Ask something about the book..." />
+        <button onclick="ask()">Ask</button>
+    </div>
+
+    <div class="answer-card" id="answerCard">
+        <div class="answer-title">Answer:</div>
+        <div class="answer-text" id="answer">
+            Your answer will appear here.
+        </div>
+        <div class="sources">
+            <span class="badge" id="sourcesBadge"></span>
+        </div>
+    </div>
+</div>
+
+<script>
+async function ask() {
+    const question = document.getElementById("question").value;
+    const answerDiv = document.getElementById("answer");
+    const sourcesBadge = document.getElementById("sourcesBadge");
+    const answerCard = document.getElementById("answerCard");
+
+    if (!question.trim()) return;
+
+    answerDiv.innerText = "Thinking...";
+    sourcesBadge.innerText = "";
+    answerCard.classList.add("loading");
+
+    try {
+        const response = await fetch("http://127.0.0.1:8000/ask", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ question })
+        });
+
+        const data = await response.json();
+
+        answerDiv.innerText = data.answer;
+        sourcesBadge.innerText = data.sources_used 
+            ? data.sources_used + " sources used"
+            : "";
+
+    } catch (error) {
+        answerDiv.innerText = "Error connecting to backend.";
+    }
+
+    answerCard.classList.remove("loading");
+}
+</script>
+
+</body>
+</html>
