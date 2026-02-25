@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 # CONFIG
 # -----------------------------
 TOP_K = 8
-DISTANCE_THRESHOLD = 1.2
+DISTANCE_THRESHOLD = 1.5
 EMBED_MODEL = "text-embedding-3-small"
 CHAT_MODEL = "gpt-4o-mini"
 
@@ -126,7 +126,7 @@ def ask(query: Query):
     retrieved_chunks = [item["chunk"] for item in retrieved_items]
     context = "\n\n".join(retrieved_chunks)
 
-    avg_distance = float(np.mean([item["distance"] for item in retrieved_items]))
+    best_distance = float(retrieved_items[0]["distance"])
     overall_confidence = round(
         np.mean([item["confidence"] for item in retrieved_items[:5]]), 2
     )
@@ -148,7 +148,7 @@ def ask(query: Query):
                 "role": "system",
                 "content": (
                     "Answer strictly using the provided context. "
-                    "If the answer is not present, respond with ONLY: NOT_FOUND"
+                    "If the answer is not present anywhere in the context, respond with ONLY: NOT_FOUND"
                 )
             },
             {
@@ -161,7 +161,8 @@ def ask(query: Query):
     rag_answer = rag_completion.choices[0].message.content.strip()
 
     # 4️⃣ Strict RAG: no fallback model call
-    if "NOT_FOUND" in rag_answer or avg_distance > DISTANCE_THRESHOLD:
+    retrieval_is_weak = best_distance > DISTANCE_THRESHOLD
+    if "NOT_FOUND" in rag_answer and retrieval_is_weak:
         return {
             "answer": "I could not find this answer in the retrieved document context.",
             "mode": "RAG_NO_ANSWER",
