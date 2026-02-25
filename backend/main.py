@@ -53,6 +53,21 @@ def clean_answer(text):
     text = text.replace("*", "")
     return text.strip()
 
+def clamp(value, min_value, max_value):
+    return max(min_value, min(value, max_value))
+
+def distance_to_confidence(distance):
+    # Lower L2 distance means better match.
+    # Map distance to a bounded 0-100 score.
+    raw = 1.0 - (distance / (DISTANCE_THRESHOLD * 2.0))
+    return round(clamp(raw, 0.0, 1.0) * 100, 2)
+
+def make_excerpt(text, max_chars=420):
+    compact = " ".join(str(text).split())
+    if len(compact) <= max_chars:
+        return compact
+    return compact[:max_chars].rstrip() + "..."
+
 # -----------------------------
 # REQUEST MODEL
 # -----------------------------
@@ -86,11 +101,43 @@ def ask(query: Query):
 
     # 2️⃣ Retrieve from FAISS
     distances, indices = index.search(question_embedding, TOP_K)
+    retrieved_items = []
+    for idx, distance in zip(indices[0], distances[0]):
+        if idx < 0:
+            continue
+        chunk_text = str(chunks[idx])
+        retrieved_items.append(
+            {
+                "chunk": chunk_text,
+                "distance": float(distance),
+                "confidence": distance_to_confidence(float(distance))
+            }
+        )
 
-    retrieved_chunks = [chunks[i] for i in indices[0]]
+    if not retrieved_items:
+        return {
+            "answer": "I could not find this answer in the retrieved document context.",
+            "mode": "RAG_NO_ANSWER",
+            "confidence": 0.0,
+            "sources_used": 0,
+            "top_passages": []
+        }
+
+    retrieved_chunks = [item["chunk"] for item in retrieved_items]
     context = "\n\n".join(retrieved_chunks)
 
-    avg_distance = float(np.mean(distances))
+    avg_distance = float(np.mean([item["distance"] for item in retrieved_items]))
+    overall_confidence = round(
+        np.mean([item["confidence"] for item in retrieved_items[:5]]), 2
+    )
+    top_passages = [
+        {
+            "passage": make_excerpt(item["chunk"]),
+            "distance": round(item["distance"], 4),
+            "confidence": item["confidence"]
+        }
+        for item in retrieved_items[:5]
+    ]
 
     # 3️⃣ Attempt RAG Answer
     rag_completion = client.chat.completions.create(
@@ -117,11 +164,17 @@ def ask(query: Query):
     if "NOT_FOUND" in rag_answer or avg_distance > DISTANCE_THRESHOLD:
         return {
             "answer": "I could not find this answer in the retrieved document context.",
-            "mode": "RAG_NO_ANSWER"
+            "mode": "RAG_NO_ANSWER",
+            "confidence": overall_confidence,
+            "sources_used": len(top_passages),
+            "top_passages": top_passages
         }
 
     # 5️⃣ Return RAG Answer
     return {
         "answer": clean_answer(rag_answer),
-        "mode": "RAG"
+        "mode": "RAG",
+        "confidence": overall_confidence,
+        "sources_used": len(top_passages),
+        "top_passages": top_passages
     }

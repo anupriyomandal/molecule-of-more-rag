@@ -104,6 +104,46 @@
         .loading {
             opacity: 0.6;
         }
+
+        .meta-row {
+            margin-top: 12px;
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .passages {
+            margin-top: 22px;
+            border-top: 1px solid #e3eaf5;
+            padding-top: 16px;
+        }
+
+        .passages-title {
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #1f2d3d;
+        }
+
+        .passage-item {
+            background: #ffffff;
+            border: 1px solid #e3eaf5;
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 10px;
+        }
+
+        .passage-meta {
+            font-size: 12px;
+            color: #6b7785;
+            margin-bottom: 6px;
+        }
+
+        .passage-text {
+            color: #384455;
+            line-height: 1.5;
+            font-size: 14px;
+        }
     </style>
 </head>
 <body>
@@ -121,23 +161,41 @@
         <div class="answer-text" id="answer">
             Your answer will appear here.
         </div>
-        <div class="sources">
+        <div class="meta-row">
             <span class="badge" id="sourcesBadge"></span>
+            <span class="badge" id="confidenceBadge"></span>
+        </div>
+        <div class="passages" id="passagesSection">
+            <div class="passages-title">Top Relevant Passages</div>
+            <div id="passagesList"></div>
         </div>
     </div>
 </div>
 
 <script>
+function escapeHtml(text) {
+    return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
 async function ask() {
     const question = document.getElementById("question").value;
     const answerDiv = document.getElementById("answer");
     const sourcesBadge = document.getElementById("sourcesBadge");
+    const confidenceBadge = document.getElementById("confidenceBadge");
     const answerCard = document.getElementById("answerCard");
+    const passagesList = document.getElementById("passagesList");
 
     if (!question.trim()) return;
 
     answerDiv.innerText = "Thinking...";
     sourcesBadge.innerText = "";
+    confidenceBadge.innerText = "";
+    passagesList.innerHTML = "";
     answerCard.classList.add("loading");
 
     try {
@@ -155,9 +213,29 @@ async function ask() {
         sourcesBadge.innerText = data.sources_used 
             ? data.sources_used + " sources used"
             : "";
+        confidenceBadge.innerText = typeof data.confidence === "number"
+            ? "Confidence: " + data.confidence.toFixed(2) + "%"
+            : "";
+
+        if (Array.isArray(data.top_passages) && data.top_passages.length > 0) {
+            passagesList.innerHTML = data.top_passages.map((item, idx) => {
+                const passage = escapeHtml(item.passage || "");
+                const distance = typeof item.distance === "number" ? item.distance.toFixed(4) : "-";
+                const confidence = typeof item.confidence === "number" ? item.confidence.toFixed(2) + "%" : "-";
+                return `
+                    <div class="passage-item">
+                        <div class="passage-meta">#${idx + 1} | confidence: ${confidence} | distance: ${distance}</div>
+                        <div class="passage-text">${passage}</div>
+                    </div>
+                `;
+            }).join("");
+        } else {
+            passagesList.innerHTML = "<div class=\"passage-text\">No relevant passage found.</div>";
+        }
 
     } catch (error) {
         answerDiv.innerText = "Error connecting to backend.";
+        passagesList.innerHTML = "";
     }
 
     answerCard.classList.remove("loading");
