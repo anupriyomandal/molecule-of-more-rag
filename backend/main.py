@@ -83,6 +83,10 @@ def keyword_hits(text, terms):
     lowered = str(text).lower()
     return sum(1 for term in terms if term in lowered)
 
+def is_not_found(answer):
+    normalized = str(answer or "").strip().upper().rstrip(".!")
+    return normalized == "NOT_FOUND"
+
 # -----------------------------
 # REQUEST MODEL
 # -----------------------------
@@ -168,8 +172,9 @@ def ask(query: Query):
             {
                 "role": "system",
                 "content": (
-                    "Answer strictly using the provided context. "
-                    "If the answer is not present anywhere in the context, respond with ONLY: NOT_FOUND"
+                    "Answer strictly using only the provided context. "
+                    "If the context has partial clues, provide the best concise answer and mention uncertainty briefly. "
+                    "Respond with ONLY: NOT_FOUND only when the answer is truly absent from all provided context."
                 )
             },
             {
@@ -182,7 +187,39 @@ def ask(query: Query):
     rag_answer = rag_completion.choices[0].message.content.strip()
 
     # 4️⃣ Strict RAG: no fallback model call
-    if "NOT_FOUND" in rag_answer:
+    if is_not_found(rag_answer):
+        # Retry once with strongest lexical evidence before returning no-answer.
+        # This remains strict RAG because it only uses retrieved passages.
+        top_lexical_chunks = [item["chunk"] for item in retrieved_items[:3]]
+        lexical_context = "\n\n".join(top_lexical_chunks)
+        retry_completion = client.chat.completions.create(
+            model=CHAT_MODEL,
+            temperature=0.0,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Use only the context below. "
+                        "If any passage contains enough evidence, answer directly in 1-2 sentences. "
+                        "Return ONLY NOT_FOUND if there is truly no supporting evidence."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": f"Context:\n{lexical_context}\n\nQuestion: {query.question}"
+                }
+            ]
+        )
+        retry_answer = retry_completion.choices[0].message.content.strip()
+        if not is_not_found(retry_answer):
+            return {
+                "answer": clean_answer(retry_answer),
+                "mode": "RAG",
+                "confidence": overall_confidence,
+                "sources_used": len(top_passages),
+                "top_passages": top_passages
+            }
+
         return {
             "answer": "I could not find this answer in the retrieved document context.",
             "mode": "RAG_NO_ANSWER",
