@@ -71,6 +71,8 @@ def ask(query: Query):
 
     if not query.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty.")
+    if index is None or chunks is None:
+        raise HTTPException(status_code=500, detail="Vector index is not loaded.")
 
     # 1️⃣ Embed Question
     embedding_response = client.embeddings.create(
@@ -111,29 +113,11 @@ def ask(query: Query):
 
     rag_answer = rag_completion.choices[0].message.content.strip()
 
-    # 4️⃣ Fallback to GPT if needed
+    # 4️⃣ Strict RAG: no fallback model call
     if "NOT_FOUND" in rag_answer or avg_distance > DISTANCE_THRESHOLD:
-
-        gpt_completion = client.chat.completions.create(
-            model=CHAT_MODEL,
-            temperature=0.5,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a helpful neuroscience assistant."
-                },
-                {
-                    "role": "user",
-                    "content": query.question
-                }
-            ]
-        )
-
-        gpt_answer = gpt_completion.choices[0].message.content
-
         return {
-            "answer": clean_answer(gpt_answer),
-            "mode": "GPT"
+            "answer": "I could not find this answer in the retrieved document context.",
+            "mode": "RAG_NO_ANSWER"
         }
 
     # 5️⃣ Return RAG Answer
