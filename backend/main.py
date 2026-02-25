@@ -15,6 +15,7 @@ TOP_K = 8
 DISTANCE_THRESHOLD = 1.5
 EMBED_MODEL = "text-embedding-3-small"
 CHAT_MODEL = "gpt-4o-mini"
+RETRIEVAL_POOL_K = 24
 
 # -----------------------------
 # INIT
@@ -68,6 +69,20 @@ def make_excerpt(text, max_chars=420):
         return compact
     return compact[:max_chars].rstrip() + "..."
 
+def extract_query_terms(text):
+    stopwords = {
+        "a", "an", "the", "is", "are", "was", "were", "what", "which", "who",
+        "when", "where", "why", "how", "in", "on", "at", "to", "for", "of",
+        "and", "or", "it", "this", "that", "these", "those", "do", "does",
+        "did", "be", "as", "by", "with", "from", "about", "into", "your"
+    }
+    terms = re.findall(r"[a-z0-9]+", str(text).lower())
+    return sorted({term for term in terms if len(term) > 2 and term not in stopwords})
+
+def keyword_hits(text, terms):
+    lowered = str(text).lower()
+    return sum(1 for term in terms if term in lowered)
+
 # -----------------------------
 # REQUEST MODEL
 # -----------------------------
@@ -100,7 +115,8 @@ def ask(query: Query):
     ).astype("float32")
 
     # 2️⃣ Retrieve from FAISS
-    distances, indices = index.search(question_embedding, TOP_K)
+    distances, indices = index.search(question_embedding, RETRIEVAL_POOL_K)
+    query_terms = extract_query_terms(query.question)
     retrieved_items = []
     for idx, distance in zip(indices[0], distances[0]):
         if idx < 0:
@@ -110,7 +126,8 @@ def ask(query: Query):
             {
                 "chunk": chunk_text,
                 "distance": float(distance),
-                "confidence": distance_to_confidence(float(distance))
+                "confidence": distance_to_confidence(float(distance)),
+                "keyword_hits": keyword_hits(chunk_text, query_terms)
             }
         )
 
@@ -123,10 +140,13 @@ def ask(query: Query):
             "top_passages": []
         }
 
+    # Hybrid re-rank: prioritize chunks that contain query terms, then semantic distance.
+    retrieved_items.sort(key=lambda item: (-item["keyword_hits"], item["distance"]))
+    retrieved_items = retrieved_items[:TOP_K]
+
     retrieved_chunks = [item["chunk"] for item in retrieved_items]
     context = "\n\n".join(retrieved_chunks)
 
-    best_distance = float(retrieved_items[0]["distance"])
     overall_confidence = round(
         np.mean([item["confidence"] for item in retrieved_items[:5]]), 2
     )
@@ -134,7 +154,8 @@ def ask(query: Query):
         {
             "passage": make_excerpt(item["chunk"]),
             "distance": round(item["distance"], 4),
-            "confidence": item["confidence"]
+            "confidence": item["confidence"],
+            "keyword_hits": item["keyword_hits"]
         }
         for item in retrieved_items[:5]
     ]
@@ -161,8 +182,7 @@ def ask(query: Query):
     rag_answer = rag_completion.choices[0].message.content.strip()
 
     # 4️⃣ Strict RAG: no fallback model call
-    retrieval_is_weak = best_distance > DISTANCE_THRESHOLD
-    if "NOT_FOUND" in rag_answer and retrieval_is_weak:
+    if "NOT_FOUND" in rag_answer:
         return {
             "answer": "I could not find this answer in the retrieved document context.",
             "mode": "RAG_NO_ANSWER",
